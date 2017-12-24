@@ -3,139 +3,176 @@ from ttk import *
 import socket
 import thread
 import json
+import time
+
+from exceptions import *
 
 class Server:
-  def __init__(self, onstatus):
-    self.onstatus = onstatus
+    def __init__(self, onstatus):
+        self.onstatus = onstatus
 
-    self.socket = None
-    self.clients = []
-    self.is_running = False
+        self.socket = None
+        self.clients = {}
+        self.is_running = False
 
-  def start(self, address, port):
-    assert not self.is_running
+    def start(self, address, port):
+        assert not self.is_running
 
-    try:
-      self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-      self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-      self.socket.bind((address, port))
-      self.socket.listen(5)
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.bind((address, port))
+            self.socket.listen(5)
 
-      thread.start_new_thread(self.listen_for_connections, ())
+            thread.start_new_thread(self.listen_for_connections, ())
 
-      self.is_running = True
-    except Exception as e:
-      self.onstatus("Failed to start server: %s" % (e))
+            self.is_running = True
 
-  def stop(self):
-    assert self.is_running
-    assert not self.socket is None
+            self.onstatus("Server is running")
+        except Exception as e:
+            self.onstatus("Failed to start server: {}".format(e))
 
-    self.socket.close()
-    self.is_running = False
+    def stop(self):
+        assert self.is_running
+        assert not self.socket is None
 
-  def add_client(self, client_socket, client_address):
-    self.onstatus("Client connected: {}:{}".format(*client_address))
+        self.socket.close()
+        self.is_running = False
+        self.clients = {}
+        
+        self.onstatus("Server not running")
 
-    self.clients.append(client_socket)
-    client_socket.send("welcome")
-    thread.start_new_thread(self.handle_client_messages, (client_socket, client_address))
+    def add_client(self, client_socket, client_address):
+        assert self.is_running
 
-  def remove_client(self, client_socket, client_address):
-    self.pnstatus("Client disconnected: {}:{}".format(*client_address))
+        self.clients["%s:%s" % client_address] = client_socket
+        thread.start_new_thread(self.handle_client_messages, (client_socket, client_address))
+        self.onstatus("Server is running ({} active connections)".format(len(self.clients)))
 
-    self.clients.remove(client_socket)
+    def remove_client(self, client_socket, client_address):
+        self.clients.pop("%s:%s" % client_address)
+        self.onstatus("Server is running ({} active connections)".format(len(self.clients)))
 
-  def listen_for_connections(self):
-    while 1:
-      client_socket, client_address = self.socket.accept()
-      self.add_client(client_socket, client_address)
+    def listen_for_connections(self):
+        while self.is_running:
+            try:
+                client_socket, client_address = self.socket.accept()
+                self.add_client(client_socket, client_address)
+            except:
+                break
+        
+        if self.is_running:
+            self.stop()
 
-    self.socket.close()
+    def respond_to_command(self, client_socket, obj):
+        msg_type = obj["type"]
 
-  def handle_client_messages(self, client_socket, client_address):
-    while 1:
-      try:
-        data = client_socket.recv(1024)
+        if msg_type is None:
+            raise InvalidMessage(obj)
 
-        if not data:
-          break
+        if msg_type == "listclients":
+            client_socket.send(json.dumps(self.clients))
+        elif msg_type == "broadcast":
+            if obj["msg"] is None:
+                raise InvalidMessage(obj)
 
-        if data == "listclients":
-          client_socket.send(json.dumps(self.clients))
+            self.socket.sendall(obj["msg"])
 
-      except:
-        break
-    
-    self.remove_client(client_socket, client_address)
-    client_socket.close()
+    def handle_client_messages(self, client_socket, client_address):
+        while self.is_running:
+            try:
+                data = client_socket.recv(1024)
+
+                if not data:
+                    break
+
+                obj = None
+
+                try:
+                    obj = json.loads(data)
+                except:
+                    raise InvalidMessage(data)
+
+                self.respond_to_command(client_socket, obj)
+
+            except InvalidMessage as e:
+                self.onstatus(str(e))
+                continue
+
+            except Exception as e:
+                break
+        
+        client_socket.close()
+        self.remove_client(client_socket, client_address)
 
 
 class P2PServer(Frame):
-  def __init__(self, root):
-    Frame.__init__(self, root)
-    self.root = root
+    def __init__(self, root):
+        Frame.__init__(self, root)
+        self.root = root
 
-    self.server = Server(onstatus=self.status)
-    self.setup_ui()
+        self.server = Server(onstatus=self.status)
 
-  def setup_ui(self):
-    self.root.title("P2P Server")
+    def show(self):
+        self.root.title("P2P Server")
 
-    parent_frame = Frame(self.root)
-    parent_frame.grid(padx=10, pady=10, sticky=E+W+N+S)
+        parent_frame = Frame(self.root)
+        parent_frame.grid(padx=10, pady=10, sticky=E+W+N+S)
 
-    server_info_frame = Frame(parent_frame)
+        server_info_frame = Frame(parent_frame)
 
-    self.address_var = StringVar()
-    self.address_var.set("127.0.0.1")
+        self.address_var = StringVar()
+        self.address_var.set("127.0.0.1")
 
-    address_label = Label(server_info_frame, text="Address:")
-    address_label.grid(row=0, column=0)
+        address_label = Label(server_info_frame, text="Address:")
+        address_label.grid(row=0, column=0)
 
-    self.address_field = Entry(server_info_frame, width=15, textvariable=self.address_var)
-    self.address_field.grid(row=0, column=1)
+        self.address_field = Entry(server_info_frame, width=15, textvariable=self.address_var)
+        self.address_field.grid(row=0, column=1)
 
-    self.port_var = StringVar()
-    self.port_var.set("8090")
+        self.port_var = StringVar()
+        self.port_var.set("8090")
 
-    port_label = Label(server_info_frame, text="Port:")
-    port_label.grid(row=0, column=2)
+        port_label = Label(server_info_frame, text="Port:")
+        port_label.grid(row=0, column=2, padx=5)
 
-    self.port_field = Entry(server_info_frame, width=5, textvariable=self.port_var)
-    self.port_field.grid(row=0, column=3)
+        self.port_field = Entry(server_info_frame, width=5, textvariable=self.port_var)
+        self.port_field.grid(row=0, column=3)
 
-    server_info_frame.grid(row=0, column=0)
+        self.start_server_button = Button(server_info_frame, text="Start Server", command=self.start_server)
+        self.start_server_button.grid(row=0, column=4, sticky=E+W, padx=(5, 0))
 
-    bottom_frame = Frame(parent_frame)
+        server_info_frame.grid(row=0, column=0)
 
-    self.start_server_button = Button(bottom_frame, text="Start Server", command=self.start_server)
-    self.start_server_button.grid(row=0, column=0, sticky=E+W)
+        bottom_frame = Frame(parent_frame)
 
-    self.status_label = Label(bottom_frame)
-    self.status_label.grid(row=1, column=0, sticky=W)
+        self.status_label = Label(bottom_frame, text="Server not running")
+        self.status_label.grid(row=1, column=0, sticky=W)
 
-    bottom_frame.grid(row=1, column=0, sticky=E+W+S, pady=(5, 0))
+        bottom_frame.grid(row=1, column=0, sticky=E+W+S, pady=(5, 0))
 
-  def start_server(self):
-    self.server.start(self.address_var.get().replace(' ', ''), int(self.port_var.get().replace(' ', '')))
-    self.start_server_button.config(text="Stop Server", command=self.stop_server)
+    def start_server(self):
+        self.server.start(self.address_var.get().replace(' ', ''), int(self.port_var.get().replace(' ', '')))
+        self.start_server_button.config(text="Stop Server", command=self.stop_server)
 
-  def stop_server(self):
-    self.server.stop()
-    self.start_server_button.config(text="Start Server", command=self.start_server)
+    def stop_server(self):
+        self.server.stop()
+        self.start_server_button.config(text="Start Server", command=self.start_server)
 
-  def status(self, msg, timeout=None):
-    self.status_label.config(text=msg)
+    def status(self, msg, timeout=None):
+        self.status_label.config(text=msg)
 
-    if not timeout is None:
-      thread.start_new_thread(lambda: time.sleep(timeout) or self.status(""), ())
+        if not timeout is None:
+            thread.start_new_thread(lambda: time.sleep(timeout) or self.status(""), ())
 
 
 def main():
-  root = Tk()
-  p2p_server = P2PServer(root)
-  root.mainloop()
+    root = Tk()
+
+    p2p_server = P2PServer(root)
+    p2p_server.show()
+
+    root.mainloop()
 
 if __name__ == '__main__':
-  main()
+    main()
