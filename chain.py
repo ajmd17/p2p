@@ -2,8 +2,12 @@ import time
 import os
 import thread
 import re
+import sqlite3
 
 from block import *
+
+conn = sqlite3.connect('blocks.db')
+c = conn.cursor()
 
 class Chain:
     def __init__(self):
