@@ -4,13 +4,15 @@ import socket
 import thread
 import json
 import time
+import datetime
 
 from client import *
 
 class Server:
-    def __init__(self, onstatus):
+    def __init__(self, blockchain, onstatus):
         self.onstatus = onstatus
 
+        self.blockchain = blockchain
         self.socket = None
         self.clients = {}
         self.is_running = False
@@ -30,7 +32,7 @@ class Server:
 
             self.onstatus("Server is running")
         except Exception as e:
-            self.onstatus("Failed to start server: {}".format(e))
+            self.onstatus("Failed to start server; Consider restarting the application. The error message was: {}".format(e))
 
     def stop(self):
         assert self.is_running
@@ -39,7 +41,7 @@ class Server:
         self.socket.close()
         self.is_running = False
         self.clients = {}
-        self.peers = {}
+        self.peers = []
         
         self.onstatus("Server not running")
 
@@ -71,10 +73,10 @@ class Server:
     def respond_to_command(self, client_socket, obj):
         msg_type = obj["type"]
 
+        print "msg_type = {}".format(msg_type)
+
         if msg_type is None:
             raise InvalidMessage(obj)
-
-        print 'msg_type = {}'.format(msg_type)
 
         if msg_type == 'ping':
             client_socket.send(json.dumps({
@@ -86,7 +88,20 @@ class Server:
             # latest block was requested from a child node,
             # so we make sure we are in sync first, and if we are, send it along.
             # if not, we resync first.
-            self._checksync()
+            #self._checksync()
+
+            client_socket.send(json.dumps({
+                'type': 'retrievelatestblock',
+                'block': self.blockchain.latestblock().serialize_obj()
+            }))
+        elif msg_type == 'fetchblocks':
+            if obj['blockidgt'] is None:
+                raise InvalidMessage(obj)
+
+            client_socket.send(json.dumps({
+                'type': 'retrieveblocks',
+                'blocks': [block.serialize_obj() for block in self.blockchain.blocks if block.blockid > obj['blockidgt']]
+            }))
         elif msg_type == "broadcast":
             if obj["msg"] is None:
                 raise InvalidMessage(obj)
@@ -120,6 +135,8 @@ class Server:
         self.remove_client(client_socket, client_address)
 
     def _checksync(self):
+        self.onstatus("Updating sync state...")
+
         for peer in self.peers:
             pass
 
@@ -129,15 +146,17 @@ class P2PServer(Frame):
         Frame.__init__(self, root)
         self.root = root
 
-        self.server = Server(onstatus=self.server_status)
 
         self.client = Client({
             'onconnect': self._onselfconnect,
             'ondisconnect': self._onselfdisconnect,
             'onfailure': self._onselffailure,
-            'onstatus': self.client_status
+            'onstatus': self.client_status,
+            'onerror': self.client_error
         }) # so it can connect to other servers as a client
     
+        self.server = Server(blockchain=self.client.blockchain, onstatus=self.server_status)
+
     def _onselfconnect(self):
         self.client_status("Connected to server successfully")
         self.connect_to_server_button.config(text="Disconnect", command=self.disconnect_from_server)
@@ -157,6 +176,7 @@ class P2PServer(Frame):
 
         self._create_start_server_frame(parent_frame)
         self._create_connect_to_server_frame(parent_frame)
+        self._create_log_frame(parent_frame)
 
     def _create_start_server_frame(self, parent_frame):
         server_info_frame = Frame(parent_frame)
@@ -230,6 +250,17 @@ class P2PServer(Frame):
 
         connect_to_server_frame.grid(row=1, column=0, sticky=W+E)
 
+    def _create_log_frame(self, parent_frame):
+        log_frame = Frame(parent_frame)
+
+        self.text_area = Text(log_frame, height=15)
+        self.text_area.grid(row=1, column=1, sticky=N+E+W+S)
+
+        log_frame.grid(row=3, column=0, sticky=W+E+N+S)
+
+    def log(self, message):
+        self.text_area.insert(END, "\n{}: {}".format(str(datetime.datetime.now()), message))
+
     def connect_to_server(self):
         self.client.connect(self.connect_address_var.get().replace(' ', ''), int(self.connect_port_var.get().replace(' ', '')))
 
@@ -248,15 +279,19 @@ class P2PServer(Frame):
 
     def _status(self, status_label, msg, timeout=None):
         status_label.config(text=msg)
+        self.log(msg)
 
         if not timeout is None:
-            thread.start_new_thread(lambda: time.sleep(timeout) or self._status(status_label, ""), ())
+           thread.start_new_thread(lambda: time.sleep(timeout) or self._status(status_label, ""), ())
 
     def server_status(self, msg, timeout=None):
         self._status(self.server_status_label, msg, timeout)
 
     def client_status(self, msg, timeout=None):
         self._status(self.client_status_label, msg, timeout)
+
+    def client_error(self, msg, timeout=None):
+        self._status(self.client_status_label, '*** ERROR ***: {}'.format(msg), timeout)
 
 
 def main():
