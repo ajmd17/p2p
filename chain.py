@@ -50,8 +50,11 @@ class Chain:
                 if k == 'tx':
                     handlers['onstatus']('Creating genesis block before starting peer sync...')
                     self._creategenesisblock(handlers)
+                else:
+                    self.local_blocks_loaded = True
             else:
                 handlers['onstatus']('Done loading local blocks in path \'{}\'.'.format(pth))
+                self.local_blocks_loaded = True
         else:
             handlers['onstatus']('No local blocks to load.')
 
@@ -62,10 +65,9 @@ class Chain:
                 handlers['onstatus']('Creating genesis block before starting peer sync...')
                 self._creategenesisblock(handlers)
 
-        self.local_blocks_loaded = True
-
     def _creategenesisblock(self, handlers):
-        GENESISTX.savelocal()
+        assert self.key == 'tx'
+        GENESISTX.savelocal(self.key)
 
         # re-run
         self.loadlocal(handlers)

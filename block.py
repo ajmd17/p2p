@@ -44,9 +44,13 @@ class Block:
 
         return Block(blockid=int(obj['blockid']), timestamp=obj['timestamp'], data=obj['data'], parent=obj['parent'])
 
-    def savelocal(self):
-        f = open('./data/blk/blk-{}.dat'.format(self.blockid), 'w+')
+    def savelocal(self, bc):
+        f = open('./data/{}/{}-{}.dat'.format(bc.key, bc.key, self.blockid), 'w+')
         f.write(self.serialize_json())
+
+    def calcnumcnfs(self, cnf_bc):
+        cnfs = filter(lambda x: x.blockid == self.blockid, cnf_bc.blocks)
+        return len(cnfs)
 
 
 class Transaction(Block):
@@ -71,9 +75,26 @@ class Transaction(Block):
         return Transaction(blockid=int(obj['blockid']), timestamp=obj['timestamp'], senderid=obj['data']['sender'], receiverid=obj['data']['receiver'], amt=obj['data']['amt'], parent=obj['parent'])
 
 
-    def savelocal(self):
-        f = open('./data/tx/tx-{}.dat'.format(self.blockid), 'w+')
-        f.write(self.serialize_json())
+class Confirmation(Block):
+    def __init__(self, blockid, timestamp, linkedblockid, validatorid, result, parent):
+        Block.__init__(self, blockid, timestamp, { 'linkedblock': linkedblockid, 'validator': validatorid, 'result': result }, parent)
+
+    @classmethod
+    def deserialize_obj(cls, obj):
+        assert obj['blockid'] is not None
+        assert obj['timestamp'] is not None
+        assert obj['data'] is not None
+        assert obj['data']['validator'] is not None
+        assert isinstance(obj['data']['validator'], basestring)
+        assert obj['data']['linkedblock'] is not None
+        assert isinstance(obj['data']['linkedblock'], int)
+        assert obj['data']['result'] is not None
+        assert isinstance(obj['data']['result'], basestring)
+        assert obj['data']['result'] == 'FAILURE' or obj['data']['result'] == 'SUCCESS'
+
+        obj['timestamp'] = datetime.datetime.strptime(obj['timestamp'], "%Y-%m-%dT%H:%M:%S")
+
+        return Confirmation(blockid=int(obj['blockid']), timestamp=obj['timestamp'], linkedblockid=obj['data']['linkedblock'], validatorid=obj['data']['validator'], result=obj['data']['result'], parent=obj['parent'])
 
 GENESISTX = Transaction(
     blockid=0,

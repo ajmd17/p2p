@@ -18,7 +18,7 @@ class P2PServer(Frame):
 
         self.blockchains = {}
 
-        for k in ['tx', 'blk', 'cnf']:
+        for k in ['tx', 'tx_cnf', 'blk', 'blk_cnf']:
             chain = Chain(k)
             self.blockchains[k] = chain
             chain.loadlocal(handlers={
@@ -28,8 +28,9 @@ class P2PServer(Frame):
 
         self.client = Client(
             self.blockchains['tx'],
+            self.blockchains['tx_cnf'],
             self.blockchains['blk'],
-            self.blockchains['cnf'],
+            self.blockchains['blk_cnf'],
             {
                 'onconnect': self._onselfconnect,
                 'ondisconnect': self._onselfdisconnect,
@@ -41,8 +42,9 @@ class P2PServer(Frame):
     
         self.server = Server(
             self.blockchains['tx'],
+            self.blockchains['tx_cnf'],
             self.blockchains['blk'],
-            self.blockchains['cnf'],
+            self.blockchains['blk_cnf'],
             onstatus=self.server_status
         )
 
@@ -163,6 +165,29 @@ class P2PServer(Frame):
 
         nb.add(create_new_transaction_frame, text='Create Transaction')
 
+        public_ledger_frame = Frame(parent_frame)
+        self.public_ledger_list = Listbox(public_ledger_frame, height=15, width=50)
+        self.public_ledger_list.grid(row=0, column=0, sticky=N+E+W+S)
+        refresh_ledger_button = Button(public_ledger_frame, text='Refresh', command=self.refresh_public_ledger)
+        refresh_ledger_button.grid(row=1, column=0)
+        nb.add(public_ledger_frame, text='Public Ledger')
+
+    def refresh_public_ledger(self):
+        #get all accounts
+        records = {}
+
+        for tx in self.blockchains['tx'].blocks:
+            for acct in [tx.data['sender'], tx.data['receiver']]:
+                assert isinstance(acct, basestring)
+                if records.get(acct) is None:
+                    records[acct] = self.client._calcbalance(acct)
+
+        self.public_ledger_list.delete(0, END)
+        
+        for k, v in records.iteritems():
+            self.public_ledger_list.insert(END, "{}:\tConfirmed: {}\tUnconfirmed: {}".format(k, *v))
+
+
     def _reset_new_transaction_text(self):
         latest = self.blockchains['tx'].latestblock()
         self.create_new_transaction_field.delete(1.0, END)
@@ -201,7 +226,7 @@ class P2PServer(Frame):
             self.client_status("Broadcasting transaction...")
 
             self.blockchains['tx'].blocks.append(tx)
-            tx.savelocal()
+            tx.savelocal(self.blockchains['tx'])
 
             tkMessageBox.showinfo("Transaction created", "The transaction has been successfully created, and will begin propagating throughout the network.")
             self._reset_new_transaction_text()

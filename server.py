@@ -4,15 +4,17 @@ import json
 import time
 import datetime
 
+from client import InvalidMessage
 from chain import *
 
 class Server:
-    def __init__(self, tx_chain, blk_chain, cnf_chain, onstatus):
+    def __init__(self, tx_chain, tx_cnf_chain, blk_chain, blk_cnf_chain, onstatus):
         self.onstatus = onstatus
 
         self.tx_chain = tx_chain
+        self.tx_cnf_chain = tx_cnf_chain
         self.blk_chain = blk_chain
-        self.cnf_chain = cnf_chain
+        self.blk_cnf_chain = blk_cnf_chain
 
         self.socket = None
         self.clients = {}
@@ -77,10 +79,12 @@ class Server:
 
         if msg['bc'] == 'tx':
             return self.tx_chain
+        elif msg['bc'] == 'tx_cnf_chain':
+            return self.tx_cnf_chain
         elif msg['bc'] == 'blk':
             return self.blk_chain
-        elif msg['bc'] == 'cnf':
-            return self.cnf_chain
+        elif msg['bc'] == 'blk_cnf':
+            return self.blk_cnf_chain
         else:
             raise InvalidMessage('not a valid blockchain type')
 
