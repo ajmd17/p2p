@@ -1,4 +1,6 @@
+import _strptime
 import datetime
+import time
 import json
 
 class Block:
@@ -43,13 +45,41 @@ class Block:
         return Block(blockid=int(obj['blockid']), timestamp=obj['timestamp'], data=obj['data'], parent=obj['parent'])
 
     def savelocal(self):
-        f = open('./blocks/block-{}.dat'.format(self.blockid), 'w+')
+        f = open('./data/blk/blk-{}.dat'.format(self.blockid), 'w+')
         f.write(self.serialize_json())
 
 
-GENESISBLOCK = Block(
+class Transaction(Block):
+    def __init__(self, blockid, timestamp, senderid, receiverid, amt, parent):
+        Block.__init__(self, blockid, timestamp, { 'sender': senderid, 'receiver': receiverid, 'amt': amt }, parent)
+
+    @classmethod
+    def deserialize_obj(cls, obj):
+        assert obj['blockid'] is not None
+        assert obj['timestamp'] is not None
+        assert obj['data'] is not None
+        assert obj['data']['sender'] is not None
+        assert isinstance(obj['data']['sender'], basestring)
+        assert obj['data']['receiver'] is not None
+        assert isinstance(obj['data']['receiver'], basestring)
+        assert obj['data']['amt'] is not None
+        assert isinstance(obj['data']['amt'], int)
+        assert obj['data']['amt'] > 0
+
+        obj['timestamp'] = datetime.datetime.strptime(obj['timestamp'], "%Y-%m-%dT%H:%M:%S")
+
+        return Transaction(blockid=int(obj['blockid']), timestamp=obj['timestamp'], senderid=obj['data']['sender'], receiverid=obj['data']['receiver'], amt=obj['data']['amt'], parent=obj['parent'])
+
+
+    def savelocal(self):
+        f = open('./data/tx/tx-{}.dat'.format(self.blockid), 'w+')
+        f.write(self.serialize_json())
+
+GENESISTX = Transaction(
     blockid=0,
     timestamp=datetime.datetime(2018, 1, 1),
-    data={ 'val': 0, 'msg': 'Genesis Block' },
+    senderid='0x0',
+    receiverid='0x0',
+    amt=100000000,
     parent=None
 )

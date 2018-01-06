@@ -6,24 +6,35 @@ import sqlite3
 
 from block import *
 
-conn = sqlite3.connect('blocks.db')
-c = conn.cursor()
+if not os.path.isdir('./data'):
+    os.mkdir('./data')
+
+# blocks_conn = sqlite3.connect('./data/blocks.db')
+# blocks_cur = blocks_conn.cursor()
 
 class Chain:
-    def __init__(self):
+    def __init__(self, key):
         self.blocks = []
+        self.key = key
+        self.remote_diff = 0
+        self.local_blocks_loaded = False
 
     def loadlocal(self, handlers):
         thread.start_new_thread(self._loadlocalloop, (handlers,))
 
     def _loadlocalloop(self, handlers):
         time.sleep(5)
-        handlers['onstatus']('Loading local blocks...')
+        assert self.local_blocks_loaded == False
 
-        if os.path.isdir('./blocks'):
-            for dirpath, dnames, fnames in os.walk("./blocks"):
+        k = self.key
+        pth = './data/{}'.format(k)
+
+        handlers['onstatus']('Loading local blocks in path "{}"...'.format(pth))
+
+        if os.path.isdir(pth):
+            for dirpath, dnames, fnames in os.walk(pth):
                 for f in fnames:
-                    m = re.search('^block-(\d+).dat$', f)
+                    m = re.search('^{}-(\d+).dat$'.format(k), f)
                     
                     if m is not None:
                         blockindex = int(m.group(1))
@@ -31,35 +42,36 @@ class Chain:
                         try:
                             self._loadblock(blockindex, dirpath, f, handlers)
                         except (IOError, ValueError) as e:
-                            handlers['onerror']('Failed to load block #{}. It is recommended to delete the \'blocks\' directory to do a complete resync. The error was: {}'.format(blockindex, e))
+                            handlers['onerror']('Failed to load block #{} in path \'{}\'. It is recommended to delete the \'{}\' directory to do a complete resync. The error was: {}'.format(blockindex, pth, k, e))
 
             if len(self.blocks) == 0:
-                handlers['onstatus']('No local blocks to load.')
+                handlers['onstatus']('No local blocks to load in path \'{}\'.'.format(pth))
 
-                handlers['onstatus']('Creating genesis block before starting peer sync...')
-                self._creategenesisblock(handlers)
+                if k == 'tx':
+                    handlers['onstatus']('Creating genesis block before starting peer sync...')
+                    self._creategenesisblock(handlers)
             else:
-                handlers['onstatus']('Done loading local blocks. Now, starting peer sync.')
-                handlers['oncomplete']()
+                handlers['onstatus']('Done loading local blocks in path \'{}\'.'.format(pth))
         else:
             handlers['onstatus']('No local blocks to load.')
 
-            handlers['onstatus']('Creating \'blocks\' directory...')
-            os.mkdir('./blocks')
+            handlers['onstatus']('Creating \'{}\' directory...'.format(pth))
+            os.mkdir(pth)
 
-            handlers['onstatus']('Creating genesis block before starting peer sync...')
-            self._creategenesisblock(handlers)
+            if k == 'tx':
+                handlers['onstatus']('Creating genesis block before starting peer sync...')
+                self._creategenesisblock(handlers)
+
+        self.local_blocks_loaded = True
 
     def _creategenesisblock(self, handlers):
-        gen = open('./blocks/block-{}.dat'.format(GENESISBLOCK.blockid), 'w+')
-        gen.write(GENESISBLOCK.serialize_json())
-        gen.close()
+        GENESISTX.savelocal()
 
         # re-run
         self.loadlocal(handlers)
 
     def _loadblock(self, blockindex, dirpath, fname, handlers):
-        handlers['onstatus']('Loading block #{} ...'.format(blockindex))
+        # handlers['onstatus']('Loading block #{} ...'.format(blockindex))
 
         blkfile = open(os.path.join(dirpath, fname))
         blk = Block.deserialize_json(blkfile.read())
